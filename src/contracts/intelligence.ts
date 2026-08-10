@@ -67,8 +67,8 @@ export interface RuntimeHealth {
 
 export interface RuntimeCapabilities {
   runtime: true;
-  models: false;
-  tools: false;
-  memory: false;
-  agentic_execution: false;
+  models: boolean;
+  tools: boolean;
+  memory: boolean;
+  agentic_execution: boolean;
 }

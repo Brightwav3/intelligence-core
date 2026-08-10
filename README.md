@@ -1,10 +1,12 @@
 # Intelligence Core
 
-## Status: FOUNDATION COMPLETE
+## Status: CORE COMPLETE
 
-Intelligence Core will become the assistant ecosystem's model-independent intelligence runtime. The completed Foundation is a headless TypeScript library that validates structured requests, runs deterministic executions, exposes lifecycle events, supports cancellation, and reports health and capabilities.
+Intelligence Core is a headless, provider-independent TypeScript library. It validates structured requests, runs deterministic or model-backed executions, assembles context, safely orchestrates authorized external tools, and reports lifecycle, health, capabilities, and metadata-only traces.
 
-It intentionally does **not** call a model, assemble prompts, run tools, persist memory, expose HTTP, or provide a GUI.
+It includes a generic `ModelProvider` contract, `ModelGateway`, `FakeModelProvider`, and an optional Gemini REST adapter. Any additional model is added by implementing `ModelProvider`; no provider SDK belongs in the runtime.
+
+It does not own model credentials, memory storage, application tools, final authorization policy, transport, or a GUI.
 
 ## Use
 
@@ -19,6 +21,25 @@ const result = await runtime.execute({
 });
 await runtime.stop();
 ```
+
+## Model-backed use
+
+```ts
+import {
+  ActionRuntime, FakeModelProvider, IntelligenceRuntime, ModelGateway,
+} from "intelligence-core";
+
+const models = new ModelGateway();
+models.register(new FakeModelProvider({
+  responses: [{ type: "final", message: { role: "assistant", content: "Ready." } }],
+}));
+
+const runtime = new IntelligenceRuntime({
+  action: new ActionRuntime({ models, provider_id: "fake", model: "fake-1" }),
+});
+```
+
+For Gemini, construct `new GeminiModelProvider()` and set `GEMINI_API_KEY` in the runtime environment. The adapter uses the REST API directly and is replaceable.
 
 ## Commands
 

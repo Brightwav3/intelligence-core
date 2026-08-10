@@ -6,12 +6,17 @@ import type {
 import { IntelligenceRuntimeError } from "../errors/intelligence-runtime-error.js";
 import { IntelligenceEventBus } from "../events/intelligence-events.js";
 import { DeterministicExecutor } from "./deterministic-executor.js";
+import type { ActionRuntime } from "../agent/action-runtime.js";
 
 interface ActiveExecution {
   record: ExecutionRecord;
   controller: AbortController;
   resolve: (result: IntelligenceResult) => void;
   reject: (error: IntelligenceRuntimeError) => void;
+}
+
+export interface IntelligenceRuntimeOptions {
+  action?: ActionRuntime;
 }
 
 const now = (): string => new Date().toISOString();
@@ -22,6 +27,8 @@ export class IntelligenceRuntime {
   private readonly executor = new DeterministicExecutor();
   private readonly executions = new Map<ExecutionId, ActiveExecution>();
   private lifecycle: RuntimeLifecycleState = "created";
+
+  public constructor(private readonly options: IntelligenceRuntimeOptions = {}) {}
 
   public lifecycleState(): RuntimeLifecycleState { return this.lifecycle; }
 
@@ -85,7 +92,8 @@ export class IntelligenceRuntime {
   }
 
   public capabilities(): RuntimeCapabilities {
-    return { runtime: true, models: false, tools: false, memory: false, agentic_execution: false };
+    const actionEnabled = this.options.action !== undefined;
+    return { runtime: true, models: actionEnabled, tools: actionEnabled, memory: false, agentic_execution: actionEnabled };
   }
 
   private async run(executionId: ExecutionId, request: IntelligenceRequest): Promise<void> {
@@ -95,11 +103,15 @@ export class IntelligenceRuntime {
     active.record.started_at = now();
     this.events.emit({ type: "intelligence.execution.started", execution: copy(active.record), occurred_at: now() });
     try {
-      const outputs = await this.executor.execute(request, active.controller.signal);
+      const actionResult = this.options.action ? await this.options.action.execute(request, active.controller.signal) : undefined;
+      const outputs = actionResult ? [actionResult.output] : await this.executor.execute(request, active.controller.signal);
       if (active.record.status !== "running") return;
       active.record.status = "completed";
       active.record.finished_at = now();
-      const usage: Usage = { duration_ms: Date.parse(active.record.finished_at) - Date.parse(active.record.started_at) };
+      const usage: Usage = {
+        duration_ms: Date.parse(active.record.finished_at) - Date.parse(active.record.started_at),
+        ...(actionResult ? { model_calls: actionResult.iterations, tool_calls: actionResult.tool_calls } : {}),
+      };
       active.record.usage = usage;
       this.events.emit({ type: "intelligence.execution.completed", execution: copy(active.record), occurred_at: now() });
       active.resolve({ request_id: request.request_id, execution_id: executionId, status: "completed", outputs, usage });

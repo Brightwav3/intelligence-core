@@ -1,44 +1,80 @@
 # Intelligence Core Architecture
 
-## Foundation boundary
+## Foundation / Runtime
 
-Intelligence Core orchestrates future intelligence; it does not own models, memory, tools, voice, devices, UI, or application integrations. It exposes a typed library surface suitable for a future Brain Core adapter: `start`, `stop`, `health`, `capabilities`, `execute`, `cancel`, and `events`.
+Intelligence Core is a headless, model-independent library for intelligence execution. The verified Foundation exposes `start`, `stop`, `health`, `capabilities`, `execute`, `cancel`, and typed lifecycle events.
 
 ```text
-Input -> IntelligenceRuntime -> structured result
-              |       |       |
-           Context  Models   Tools
-            (null)  (types) (null)
+Input → IntelligenceRuntime → structured result
+             │       │       │
+          Context  Models   Tools
+          boundary boundary boundary
 ```
 
-## Vocabulary
+The Runtime owns immutable request identity, execution identity, optional session identity, lifecycle, cancellation, stale-result protection, structured errors, typed events, health, capabilities, concurrency, and clean shutdown. It remains provider-independent.
 
-- **request**: immutable input entering the core, identified by `request_id`.
-- **execution**: one attempt to process a request, identified by `execution_id`.
-- **input/output**: discriminated provider-independent data shapes.
-- **context/model/provider/tool**: future extension boundaries, not Foundation features.
-- **session**: an optional generic grouping reference; it is not a voice conversation.
-- **event**: a typed lifecycle notification.
+## Five-layer roadmap
 
-## Runtime
+```text
+Foundation / Runtime
+        ↓
+Model Layer
+        ↓
+Context Layer
+        ↓
+Action Layer
+        ↓
+Production Layer
+```
 
-The runtime owns lifecycle (`created`, `starting`, `running`, `stopping`, `stopped`, `failed`) and execution state (`created`, `running`, `completed`, `failed`, `cancelled`). A deterministic executor echoes text, structured input, or event data. A cancelled execution becomes non-authoritative before its abort signal reaches the backend, so a late result cannot change it.
+These are implementation groupings, not mandatory standalone subsystems. Shared contracts for IDs, events, and errors remain in the Foundation.
+
+### Model Layer — implemented
+
+Provides `ModelGateway` and replaceable `ModelProvider` adapters. It normalizes model input, output, streaming, cancellation, usage, capabilities, and provider errors. Provider SDKs live only inside their adapters: `IntelligenceRuntime` must never depend on a provider SDK.
+
+### Context Layer — implemented
+
+Provides `ContextAssembler`, which constructs the information given to a model execution. It may consume request, session, instructions, conversation, tool descriptions, external state, memory context, and execution metadata. It does not own Memory Core or state storage; those systems supply narrow context-provider contracts.
+
+### Action Layer — implemented
+
+Provides the smallest safe model/tool execution environment. A model decides whether another step is useful and can request an available tool. The infrastructure validates the request, applies limits, asks an external policy boundary for a decision, executes through an external tool client, protects against stale results, and records the execution trace.
+
+```text
+request → context → model → response
+                         ├─ final answer → done
+                         └─ tool request → validate → policy → tool → result → context
+```
+
+Model output is untrusted input, never authorization. Calendar, mail, filesystem, browser, home automation, and similar tools remain external implementations.
+
+### Production Layer — implemented baseline
+
+Wraps the proven core path with routing, fallback, retries, budgets, provider health, metrics, evaluations, recovery, and performance hardening. It follows rather than blocks a basic single-provider path.
+
+## Historical sector mapping
+
+The former A–J sectors remain a conceptual checklist, not ten implementation projects.
+
+| Former sector | Practical layer |
+| --- | --- |
+| A — Contracts & Runtime | Foundation / Runtime |
+| B — Model Gateway | Model Layer |
+| C — Conversation & Context | Context Layer |
+| D/E/F/H — Reasoning, Tools, Agentic Execution, Authority boundary | Action Layer |
+| G/I/J — Routing, Observability, Integration & Hardening | Production Layer |
+
+## Dependency direction
+
+Later layers build on lower layers. Production concerns observe or wrap core behavior instead of becoming prerequisites for a basic execution. The model and tool boundaries prevent circular coupling and keep integrations replaceable.
+
+## Current implementation boundary
+
+`IntelligenceRuntime` remains lifecycle authority. With no action configuration it uses the deterministic Foundation executor. With `ActionRuntime`, it assembles context, calls any `ModelExecutor`, validates model tool requests, uses an external `PolicyClient`, and calls an external `ToolClient`. `ProductionModelGateway` adds configured primary/fallback routing, retryable-provider retry, response-budget enforcement, and metadata-only tracing.
+
+The repository does not persist memory, implement application tools, own authorization policy, expose HTTP, or provide a GUI. The Gemini adapter is optional and talks to REST only through its own module; a future provider implements the same `ModelProvider` interface.
 
 ## Security and observability
 
-Events provide IDs, statuses, and timestamps; user/model content is not logged by default. Model output is untrusted structured input and is never authority to perform an action. Future tool calls must cross separate validation and authorization boundaries.
-
-## Future sectors
-
-1. Core Runtime & Contracts (Foundation)
-2. Model Gateway & Providers
-3. Context Assembly
-4. Reasoning Runtime
-5. Tool Intelligence
-6. Agentic Execution
-7. Model Routing & Economics
-8. Authority, Policy & Security
-9. Observability & Evaluation
-10. Ecosystem Integration & Hardening
-
-Provider replacement requires only a future provider adapter: `IntelligenceRuntime` does not contain provider SDK payloads or assumptions.
+Events expose IDs, statuses, and timestamps; user/model content is not logged by default. Model output is not authority to perform an action. Any future tool request must cross validation and an external policy/authority boundary.

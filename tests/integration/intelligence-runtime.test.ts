@@ -4,6 +4,9 @@ import test from "node:test";
 import {
   IntelligenceRuntime,
   IntelligenceRuntimeError,
+  ActionRuntime,
+  FakeModelProvider,
+  ModelGateway,
   type IntelligenceEvent,
 } from "../../src/index.js";
 
@@ -121,4 +124,17 @@ test("clean shutdown cancels active executions and is idempotent", async () => {
   );
   assert.equal(runtime.execution(executionId!)?.status, "cancelled");
   assert.equal(runtime.lifecycleState(), "stopped");
+});
+
+test("uses the composed action runtime for model-backed executions", async () => {
+  const models = new ModelGateway();
+  models.register(new FakeModelProvider({ responses: [{ type: "final", message: { role: "assistant", content: "model answer" } }] }));
+  const runtime = new IntelligenceRuntime({ action: new ActionRuntime({ models, provider_id: "fake", model: "fake-1" }) });
+  await runtime.start();
+
+  const result = await runtime.execute(textRequest("Use a model"));
+
+  assert.deepEqual(result.outputs, [{ type: "text", text: "model answer" }]);
+  assert.equal(result.usage.model_calls, 1);
+  await runtime.stop();
 });

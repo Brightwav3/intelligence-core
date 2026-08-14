@@ -13,6 +13,29 @@ It includes a generic `ModelProvider` contract, `ModelGateway`, `FakeModelProvid
 
 It does not own model credentials, memory storage, application tools, final authorization policy, transport, or a GUI.
 
+### Accepted executions
+
+`accept(request)` admits work and returns its identity synchronously, before any
+model runs, so a caller can acknowledge and correlate immediately rather than
+waiting on a completion promise. `execute(request)` is exactly `accept(request).result`
+and keeps its previous behaviour.
+
+### Usage metering
+
+Every physical provider call emits one normalized `usage.record.v1` — voice, text,
+embeddings, retries, and failures that still consumed tokens. Retries are separate
+records because a retry is separately billable, while `call_id` keeps them
+attributable to the one logical call behind them.
+
+Missing provider usage is recorded as unknown, never as zero: an untracked call is
+unmeasured, not free. Unknown values are excluded from totals and reported as an
+unknown-usage count beside them.
+
+Pricing lives in a versioned catalog rather than in provider code, so a recorded
+cost can always be traced to the numbers that produced it. Currencies are never
+merged implicitly, and a call with no matching price follows an explicit
+`unknown_cost_policy` that is fail-closed by default.
+
 ## Use
 
 ```ts

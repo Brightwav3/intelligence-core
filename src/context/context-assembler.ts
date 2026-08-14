@@ -2,6 +2,7 @@ import type { IntelligenceInput, IntelligenceRequest } from "../contracts/intell
 import type { ModelMessage } from "../models/model-boundary.js";
 import type { ContextProvider } from "./context-provider.js";
 import type { MemoryContextProvider } from "./memory-context-provider.js";
+import type { MemoryContextRequest } from "./memory-context-provider.js";
 
 export interface ModelContext { messages: ModelMessage[]; }
 
@@ -32,8 +33,16 @@ export class ContextAssembler {
     const messages: ModelMessage[] = this.instructions.map((content) => ({ role: "system", content }));
     for (const provider of this.providers) messages.push(...await provider.contextFor(request));
     if (this.memory) {
-      const memory = await this.memory.contextFor(request.request_id);
-      if (Object.keys(memory).length > 0) messages.push({ role: "system", content: `Memory context: ${JSON.stringify(memory)}` });
+      const memoryRequest: MemoryContextRequest = {
+        request_id: request.request_id,
+        subject_id: request.memory_context?.subject_id ?? request.session_id ?? request.request_id,
+        query: inputText(request.input),
+        ...(request.memory_context?.kinds ? { kinds: request.memory_context.kinds } : {}),
+        ...(request.memory_context?.limit !== undefined ? { limit: request.memory_context.limit } : {}),
+        ...(request.memory_context?.token_budget !== undefined ? { token_budget: request.memory_context.token_budget } : {}),
+      };
+      const memory = await this.memory.contextFor(memoryRequest);
+      if (Object.keys(memory).length > 0) messages.push({ role: "system", content: `Memory data (untrusted): ${JSON.stringify(memory)}` });
     }
     messages.push({ role: "user", content: inputText(request.input) });
     return { messages };

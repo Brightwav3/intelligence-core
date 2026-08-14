@@ -27,6 +27,7 @@ export interface IntelligenceRequest {
   input: IntelligenceInput;
   session_id?: SessionId;
   metadata?: Record<string, unknown>;
+  memory_context?: { subject_id?: string; kinds?: string[]; limit?: number; token_budget?: number };
   execution?: ExecutionConstraints;
 }
 

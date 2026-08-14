@@ -7,6 +7,8 @@ export * from "./models/model-gateway.js";
 export * from "./models/fake-model-provider.js";
 export * from "./models/gemini-model-provider.js";
 export * from "./context/memory-context-provider.js";
+export * from "./memory/extraction-contracts.js";
+export * from "./memory/memory-extractor.js";
 export * from "./context/context-provider.js";
 export * from "./context/context-assembler.js";
 export * from "./tools/tool-client.js";

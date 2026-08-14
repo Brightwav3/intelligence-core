@@ -22,7 +22,7 @@ test("orders instructions, external context, memory, and request for a model", a
   assert.deepEqual(context.messages, [
     { role: "system", content: "Be concise" },
     { role: "system", content: "Timezone: Europe/Prague" },
-    { role: "system", content: "Memory context: {\"meetings\":[\"10:00 planning\"]}" },
+    { role: "system", content: "Memory data (untrusted): {\"meetings\":[\"10:00 planning\"]}" },
     { role: "user", content: "Where is my meeting?" },
   ]);
 });

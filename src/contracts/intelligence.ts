@@ -26,6 +26,8 @@ export interface IntelligenceRequest {
   request_id: RequestId;
   input: IntelligenceInput;
   session_id?: SessionId;
+  /** Correlates this execution with the conversational turn that caused it. */
+  interaction_id?: string;
   metadata?: Record<string, unknown>;
   memory_context?: { subject_id?: string; kinds?: string[]; limit?: number; token_budget?: number };
   execution?: ExecutionConstraints;
@@ -54,11 +56,25 @@ export interface IntelligenceResult {
 export interface ExecutionRecord {
   request_id: RequestId;
   execution_id: ExecutionId;
+  session_id?: SessionId;
+  interaction_id?: string;
   status: ExecutionStatus;
   created_at: string;
   started_at?: string;
   finished_at?: string;
   usage?: Usage;
+}
+
+/**
+ * A handle to work that has been admitted but not yet performed. Exists so a caller can
+ * acknowledge immediately and correlate later: the identity is available before the
+ * model runs, which a bare completion promise cannot provide.
+ */
+export interface AcceptedExecution {
+  executionId: ExecutionId;
+  record(): ExecutionRecord | undefined;
+  result: Promise<IntelligenceResult>;
+  cancel(): Promise<void>;
 }
 
 export interface RuntimeHealth {

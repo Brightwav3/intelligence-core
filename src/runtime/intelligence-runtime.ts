@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type {
-  ExecutionId, ExecutionRecord, IntelligenceRequest, IntelligenceResult, RuntimeCapabilities,
+  AcceptedExecution, ExecutionId, ExecutionRecord, IntelligenceRequest, IntelligenceResult, RuntimeCapabilities,
   RuntimeHealth, RuntimeLifecycleState, Usage,
 } from "../contracts/intelligence.js";
 import { IntelligenceRuntimeError } from "../errors/intelligence-runtime-error.js";
@@ -13,6 +13,8 @@ interface ActiveExecution {
   controller: AbortController;
   resolve: (result: IntelligenceResult) => void;
   reject: (error: IntelligenceRuntimeError) => void;
+  /** Cleared on every terminal path so a long deadline cannot outlive its execution. */
+  deadlineTimer?: ReturnType<typeof setTimeout>;
 }
 
 export interface IntelligenceRuntimeOptions {
@@ -51,30 +53,91 @@ export class IntelligenceRuntime {
     this.lifecycle = "stopped";
   }
 
-  public async execute(request: IntelligenceRequest): Promise<IntelligenceResult> {
+  /**
+   * Admits work and hands back its identity synchronously. The caller can acknowledge and
+   * correlate before any model runs, which is what makes an immediate spoken
+   * acknowledgement possible without inventing a result.
+   */
+  public accept(request: IntelligenceRequest): AcceptedExecution {
     this.assertRunning();
     this.validate(request);
     this.events.emit({ type: "intelligence.request.received", request_id: request.request_id, occurred_at: now() });
     const executionId = `exec_${randomUUID()}`;
-    const record: ExecutionRecord = { request_id: request.request_id, execution_id: executionId, status: "created", created_at: now() };
+    const record: ExecutionRecord = {
+      request_id: request.request_id,
+      execution_id: executionId,
+      ...(request.session_id ? { session_id: request.session_id } : {}),
+      ...(request.interaction_id ? { interaction_id: request.interaction_id } : {}),
+      status: "created",
+      created_at: now(),
+    };
     const controller = new AbortController();
     const promise = new Promise<IntelligenceResult>((resolve, reject) => {
       this.executions.set(executionId, { record, controller, resolve, reject });
     });
     this.events.emit({ type: "intelligence.execution.created", execution: copy(record), occurred_at: now() });
-    void this.run(executionId, request);
-    return promise;
+    this.armDeadline(executionId, request);
+    // Dispatched after accept() returns, so "accepted" is genuinely observable as a state
+    // rather than a label on work that already started.
+    queueMicrotask(() => void this.run(executionId, request));
+    return {
+      executionId,
+      record: () => this.execution(executionId),
+      result: promise,
+      cancel: () => this.cancel(executionId),
+    };
+  }
+
+  public async execute(request: IntelligenceRequest): Promise<IntelligenceResult> {
+    return this.accept(request).result;
   }
 
   public async cancel(executionId: ExecutionId): Promise<void> {
+    this.terminate(executionId, new IntelligenceRuntimeError("EXECUTION_CANCELLED", "Execution was cancelled.", false, { execution_id: executionId }), true);
+  }
+
+  /**
+   * A deadline is armed at admission, not at model dispatch: work that is queued behind
+   * something else still has to answer within the caller's budget.
+   */
+  private armDeadline(executionId: ExecutionId, request: IntelligenceRequest): void {
     const active = this.executions.get(executionId);
-    if (!active) throw new IntelligenceRuntimeError("EXECUTION_NOT_FOUND", "Execution was not found.", false, { execution_id: executionId });
+    if (!active) return;
+    const budgets: number[] = [];
+    if (typeof request.execution?.maximum_duration_ms === "number") budgets.push(request.execution.maximum_duration_ms);
+    if (request.execution?.deadline) {
+      const parsed = Date.parse(request.execution.deadline);
+      if (Number.isFinite(parsed)) budgets.push(parsed - Date.now());
+    }
+    if (!budgets.length) return;
+    const remaining = Math.max(Math.min(...budgets), 0);
+    const expire = () => this.terminate(executionId, new IntelligenceRuntimeError("EXECUTION_DEADLINE_EXCEEDED", "Execution deadline was exceeded.", false, { execution_id: executionId }), false);
+    if (remaining === 0) { queueMicrotask(expire); return; }
+    active.deadlineTimer = setTimeout(expire, remaining);
+    // The runtime must not be the reason the host process stays alive.
+    active.deadlineTimer.unref?.();
+  }
+
+  /** The single terminal path for cancellation and deadline expiry, so both stay idempotent. */
+  private terminate(executionId: ExecutionId, error: IntelligenceRuntimeError, requireKnown: boolean): void {
+    const active = this.executions.get(executionId);
+    if (!active) {
+      if (requireKnown) throw new IntelligenceRuntimeError("EXECUTION_NOT_FOUND", "Execution was not found.", false, { execution_id: executionId });
+      return;
+    }
     if (active.record.status !== "running" && active.record.status !== "created") return;
+    this.clearDeadline(active);
     active.record.status = "cancelled";
     active.record.finished_at = now();
     active.controller.abort();
     this.events.emit({ type: "intelligence.execution.cancelled", execution: copy(active.record), occurred_at: now() });
-    active.reject(new IntelligenceRuntimeError("EXECUTION_CANCELLED", "Execution was cancelled.", false, { execution_id: executionId }));
+    active.reject(error);
+  }
+
+  private clearDeadline(active: ActiveExecution): void {
+    if (active.deadlineTimer === undefined) return;
+    clearTimeout(active.deadlineTimer);
+    active.deadlineTimer = undefined;
   }
 
   public execution(executionId: ExecutionId): ExecutionRecord | undefined {
@@ -98,7 +161,8 @@ export class IntelligenceRuntime {
 
   private async run(executionId: ExecutionId, request: IntelligenceRequest): Promise<void> {
     const active = this.executions.get(executionId);
-    if (!active) return;
+    // Cancellation can win the race between admission and dispatch.
+    if (!active || active.record.status !== "created") return;
     active.record.status = "running";
     active.record.started_at = now();
     this.events.emit({ type: "intelligence.execution.started", execution: copy(active.record), occurred_at: now() });
@@ -106,6 +170,7 @@ export class IntelligenceRuntime {
       const actionResult = this.options.action ? await this.options.action.execute(request, active.controller.signal) : undefined;
       const outputs = actionResult ? [actionResult.output] : await this.executor.execute(request, active.controller.signal);
       if (active.record.status !== "running") return;
+      this.clearDeadline(active);
       active.record.status = "completed";
       active.record.finished_at = now();
       const usage: Usage = {
@@ -117,6 +182,7 @@ export class IntelligenceRuntime {
       active.resolve({ request_id: request.request_id, execution_id: executionId, status: "completed", outputs, usage });
     } catch (cause) {
       if (active.record.status !== "running") return;
+      this.clearDeadline(active);
       active.record.status = "failed";
       active.record.finished_at = now();
       this.events.emit({ type: "intelligence.execution.failed", execution: copy(active.record), occurred_at: now() });

@@ -10,6 +10,12 @@ export interface MemoryExtractionTurn {
   speaker: "user" | "assistant" | "tool" | "system";
   text: string;
   status?: "complete" | "partial" | "interrupted";
+  /**
+   * How far the text can be trusted as what was actually said. An `unreliable`
+   * transcript is still context, but it is not evidence — nothing durable may be
+   * stored on its authority alone.
+   */
+  transcriptConfidence?: "reliable" | "unreliable";
 }
 
 export interface MemoryExtractionInput {

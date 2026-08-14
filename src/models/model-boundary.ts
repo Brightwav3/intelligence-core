@@ -16,6 +16,12 @@ export interface ModelMessage {
   role: ModelRole;
   content: string;
   tool_call_id?: string;
+  /**
+   * The tool calls an assistant turn asked for. Providers that pair a call with its
+   * response need the request turn echoed back; without it the conversation reads as a
+   * result to a question that was never asked, and the model simply asks again.
+   */
+  tool_calls?: ModelToolRequest[];
 }
 
 export interface ModelToolDefinition {
@@ -28,6 +34,13 @@ export interface ModelToolRequest {
   id: string;
   tool_id: string;
   arguments: Record<string, unknown>;
+  /**
+   * Opaque provider state to hand back verbatim when this call is replayed. Some
+   * providers require their own token round-tripped with the call and reject the turn
+   * without it. Deliberately untyped: the action loop must never read or depend on it,
+   * which is what keeps a provider's vocabulary out of this contract.
+   */
+  provider_context?: Record<string, unknown>;
 }
 
 export interface ModelUsage {

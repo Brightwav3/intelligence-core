@@ -16,6 +16,12 @@ interface GeminiFunctionCall {
 interface GeminiPart {
   text?: string;
   functionCall?: GeminiFunctionCall;
+  /**
+   * Gemini 3.x reasoning token for a function call. It must be echoed back with the call
+   * or the next turn is rejected outright; it is carried through the neutral contract as
+   * opaque provider context so the name stays in this file.
+   */
+  thoughtSignature?: string;
 }
 
 interface GeminiResponse {
@@ -74,6 +80,8 @@ export class GeminiModelProvider implements ModelProvider {
   private readonly apiKey: string | undefined;
   private readonly fetchImplementation: Fetch;
   private toolCallSequence = 0;
+  /** Gemini issues no call identifiers, so this adapter mints them and must remember what each one meant. */
+  private readonly toolNamesByCallId = new Map<string, string>();
 
   public constructor(options: GeminiModelProviderOptions = {}) {
     this.apiKey = options.api_key || process.env.GEMINI_API_KEY;
@@ -100,9 +108,28 @@ export class GeminiModelProvider implements ModelProvider {
         // A tool result is a function response, not user text. Sending it as
         // text is what makes a model narrate its own tool output instead of
         // continuing the turn.
+        //
+        // The name must be the *function's* name, not the call id this adapter minted.
+        // Gemini pairs a response to a call by name; given an unknown name it treats the
+        // call as still unanswered and asks again, which loops until the iteration limit.
+        const name = (message.tool_call_id ? this.toolNamesByCallId.get(message.tool_call_id) : undefined) ?? message.tool_call_id ?? "tool";
         return {
           role: "user",
-          parts: [{ functionResponse: { name: message.tool_call_id ?? "tool", response: { result: message.content } } }],
+          parts: [{ functionResponse: { name, response: { result: message.content } } }],
+        };
+      }
+      if (message.role === "assistant" && message.tool_calls?.length) {
+        // Echo the model's own call turn back, so the following response has something
+        // to answer.
+        return {
+          role: "model",
+          parts: message.tool_calls.map((call) => {
+            const signature = call.provider_context?.thoughtSignature;
+            return {
+              functionCall: { name: call.tool_id, args: call.arguments },
+              ...(typeof signature === "string" ? { thoughtSignature: signature } : {}),
+            };
+          }),
         };
       }
       return {
@@ -130,13 +157,19 @@ export class GeminiModelProvider implements ModelProvider {
 
     const toolRequests: ModelToolRequest[] = parts
       .filter((part): part is GeminiPart & { functionCall: GeminiFunctionCall } => Boolean(part.functionCall?.name))
-      .map((part) => ({
+      .map((part) => {
         // Gemini does not issue call identifiers, so the adapter mints one. The
         // action loop needs a stable id to correlate a result with its request.
-        id: `gemini-call-${++this.toolCallSequence}`,
-        tool_id: String(part.functionCall.name),
-        arguments: part.functionCall.args ?? {},
-      }));
+        const id = `gemini-call-${++this.toolCallSequence}`;
+        const toolId = String(part.functionCall.name);
+        this.toolNamesByCallId.set(id, toolId);
+        return {
+          id,
+          tool_id: toolId,
+          arguments: part.functionCall.args ?? {},
+          ...(part.thoughtSignature ? { provider_context: { thoughtSignature: part.thoughtSignature } } : {}),
+        };
+      });
 
     if (toolRequests.length > 0) {
       return { provider_id: this.id, model: request.model, type: "tool_requests", tool_requests: toolRequests, usage };

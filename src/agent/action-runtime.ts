@@ -43,6 +43,9 @@ export class ActionRuntime {
     for (let iteration = 1; iteration <= this.maximumIterations; iteration++) {
       const response = await this.options.models.generate({ provider_id: this.options.provider_id, model: this.options.model, messages, tools }, signal);
       if (response.type === "final") return { output: { type: "text", text: response.message.content }, iterations: iteration, tool_calls: toolCalls };
+      // Record what the model asked for before recording the answers. A provider that
+      // pairs calls with responses cannot do so if the request turn is missing.
+      messages.push({ role: "assistant", content: "", tool_calls: response.tool_requests });
       for (const toolRequest of response.tool_requests) {
         const descriptor = tools.find((tool) => tool.id === toolRequest.tool_id);
         if (!descriptor) throw new IntelligenceRuntimeError("TOOL_NOT_FOUND", "Requested tool was not found.", false, { tool_id: toolRequest.tool_id });

@@ -31,9 +31,18 @@ export interface ModelToolRequest {
 }
 
 export interface ModelUsage {
+  /** @deprecated Exact alias of `input_tokens` during migration. Never an independent counter. */
   input_units?: number;
+  /** @deprecated Exact alias of `output_tokens` during migration. Never an independent counter. */
   output_units?: number;
+  input_tokens?: number;
+  output_tokens?: number;
+  cached_input_tokens?: number;
+  reasoning_tokens?: number;
+  total_tokens?: number;
   estimated_cost?: number;
+  /** Absent means the adapter did not say; the meter reads that as unknown, not zero. */
+  usage_source?: "provider" | "derived" | "unknown";
 }
 
 export interface ModelRequest {

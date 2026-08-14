@@ -1,5 +1,5 @@
 import { IntelligenceRuntimeError } from "../errors/intelligence-runtime-error.js";
-import type { Model, ModelCapabilities, ModelProvider, ModelProviderHealth, ModelRequest, ModelResponse, ModelToolDefinition, ModelToolRequest } from "./model-boundary.js";
+import type { Model, ModelCapabilities, ModelProvider, ModelProviderHealth, ModelRequest, ModelResponse, ModelToolDefinition, ModelToolRequest, ModelUsage } from "./model-boundary.js";
 
 type Fetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
@@ -20,7 +20,35 @@ interface GeminiPart {
 
 interface GeminiResponse {
   candidates?: Array<{ content?: { parts?: GeminiPart[] } }>;
-  usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
+  usageMetadata?: {
+    promptTokenCount?: number;
+    candidatesTokenCount?: number;
+    cachedContentTokenCount?: number;
+    thoughtsTokenCount?: number;
+    totalTokenCount?: number;
+  };
+}
+
+/**
+ * Maps Gemini's native counters onto the neutral dimensions. The SDK field names stop
+ * here by design. `input_units`/`output_units` are emitted as exact aliases for callers
+ * that predate the token fields — the same number twice, never two sources — and a
+ * response with no `usageMetadata` is reported as unknown so it cannot be summed as
+ * a free call.
+ */
+function toModelUsage(metadata: GeminiResponse["usageMetadata"]): ModelUsage {
+  if (!metadata) return { usage_source: "unknown" };
+  const input = metadata.promptTokenCount;
+  const output = metadata.candidatesTokenCount;
+  const known = [input, output, metadata.cachedContentTokenCount, metadata.thoughtsTokenCount, metadata.totalTokenCount].some((value) => value !== undefined);
+  return {
+    ...(input !== undefined ? { input_tokens: input, input_units: input } : {}),
+    ...(output !== undefined ? { output_tokens: output, output_units: output } : {}),
+    ...(metadata.cachedContentTokenCount !== undefined ? { cached_input_tokens: metadata.cachedContentTokenCount } : {}),
+    ...(metadata.thoughtsTokenCount !== undefined ? { reasoning_tokens: metadata.thoughtsTokenCount } : {}),
+    ...(metadata.totalTokenCount !== undefined ? { total_tokens: metadata.totalTokenCount } : {}),
+    usage_source: known ? "provider" : "unknown",
+  };
 }
 
 /**
@@ -98,7 +126,7 @@ export class GeminiModelProvider implements ModelProvider {
     if (!response.ok) throw new IntelligenceRuntimeError("MODEL_PROVIDER_FAILED", "Gemini model request failed.", response.status >= 500, { provider_id: this.id, status: response.status });
     const payload = await response.json() as GeminiResponse;
     const parts = payload.candidates?.[0]?.content?.parts ?? [];
-    const usage = { input_units: payload.usageMetadata?.promptTokenCount, output_units: payload.usageMetadata?.candidatesTokenCount };
+    const usage = toModelUsage(payload.usageMetadata);
 
     const toolRequests: ModelToolRequest[] = parts
       .filter((part): part is GeminiPart & { functionCall: GeminiFunctionCall } => Boolean(part.functionCall?.name))

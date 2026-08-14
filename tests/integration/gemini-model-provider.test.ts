@@ -37,7 +37,7 @@ test("converts normalized messages to a Gemini REST request and response", async
     model: "gemini-test",
     type: "final",
     message: { role: "assistant", content: "hello from Gemini" },
-    usage: { input_units: 3, output_units: 4 },
+    usage: { input_tokens: 3, input_units: 3, output_tokens: 4, output_units: 4, usage_source: "provider" },
   });
 });
 
@@ -184,4 +184,38 @@ test("a tool result is sent back as a function response, not as user text", asyn
   assert.deepEqual(body.contents[1].parts[0], {
     functionResponse: { name: "open_app", response: { result: "Opened browser." } },
   });
+});
+
+test("Gemini usage metadata maps onto the neutral dimensions with compatibility aliases", async () => {
+  const provider = new GeminiModelProvider({
+    api_key: "test-key",
+    fetch: async () => new Response(JSON.stringify({
+      candidates: [{ content: { parts: [{ text: "ok" }] } }],
+      usageMetadata: { promptTokenCount: 100, candidatesTokenCount: 20, cachedContentTokenCount: 60, thoughtsTokenCount: 15, totalTokenCount: 135 },
+    }), { status: 200 }),
+  });
+
+  const response = await provider.generate({ provider_id: "gemini", model: "gemini-test", messages: [{ role: "user", content: "Hello" }] });
+
+  assert.equal(response.usage?.input_tokens, 100);
+  assert.equal(response.usage?.output_tokens, 20);
+  assert.equal(response.usage?.cached_input_tokens, 60);
+  assert.equal(response.usage?.reasoning_tokens, 15);
+  assert.equal(response.usage?.total_tokens, 135);
+  assert.equal(response.usage?.usage_source, "provider");
+  assert.equal(response.usage?.input_units, response.usage?.input_tokens, "alias must be exact, never a second counter");
+  assert.equal(response.usage?.output_units, response.usage?.output_tokens);
+});
+
+test("a Gemini response without usage metadata reports unknown rather than zero", async () => {
+  const provider = new GeminiModelProvider({
+    api_key: "test-key",
+    fetch: async () => new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: "ok" }] } }] }), { status: 200 }),
+  });
+
+  const response = await provider.generate({ provider_id: "gemini", model: "gemini-test", messages: [{ role: "user", content: "Hello" }] });
+
+  assert.equal(response.usage?.usage_source, "unknown");
+  assert.equal(response.usage?.input_tokens, undefined);
+  assert.notEqual(response.usage?.input_tokens, 0);
 });

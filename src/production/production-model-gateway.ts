@@ -23,6 +23,8 @@ export interface ProductionModelGatewayOptions {
   router: ModelRouter;
   tracer?: ExecutionTracer;
   maximum_retries?: number;
+  /** Caps how long a provider's advised wait may park an execution. */
+  maximum_retry_delay_ms?: number;
   maximum_cost?: number;
   /** Records one normalized record per physical attempt. Also supplies the price catalog used for budget decisions. */
   meter?: UsageMeter & { catalog?: PriceCatalog };
@@ -32,10 +34,12 @@ export interface ProductionModelGatewayOptions {
 export class ProductionModelGateway implements ModelExecutor {
   private readonly tracer: ExecutionTracer;
   private readonly maximumRetries: number;
+  private readonly maximumRetryDelayMs: number;
 
   public constructor(private readonly options: ProductionModelGatewayOptions) {
     this.tracer = options.tracer ?? new ExecutionTracer();
     this.maximumRetries = options.maximum_retries ?? 1;
+    this.maximumRetryDelayMs = options.maximum_retry_delay_ms ?? 10_000;
   }
 
   public async generate(request: ModelRequest, signal?: AbortSignal): Promise<ModelResponse> {
@@ -67,10 +71,28 @@ export class ProductionModelGateway implements ModelExecutor {
           this.meter(callId, providerId, request, occurredAt, attempt, this.outcomeOf(runtimeError, signal), Date.now() - started, undefined, runtimeError?.code);
           lastError = cause;
           if (!retryable || attempt === this.maximumRetries) break;
+          // Retrying a rate limit immediately just spends the next attempt on the same
+          // refusal. Honour the provider's own wait when it gives one.
+          await this.waitBeforeRetry(runtimeError, attempt, signal);
         }
       }
     }
     throw lastError instanceof Error ? lastError : new IntelligenceRuntimeError("MODEL_PROVIDER_FAILED", "Model provider failed.", true);
+  }
+
+  /** Bounded so a provider cannot park an execution indefinitely by naming a long delay. */
+  private async waitBeforeRetry(error: IntelligenceRuntimeError | undefined, attempt: number, signal?: AbortSignal): Promise<void> {
+    const advised = error?.context?.retry_after_ms;
+    const suggested = typeof advised === "number" && Number.isFinite(advised) ? advised : 250 * 2 ** attempt;
+    const delay = Math.min(Math.max(suggested, 0), this.maximumRetryDelayMs);
+    // An already-aborted signal never emits `abort` again, so the listener below would
+    // never fire and the execution would sit out the whole delay after being cancelled.
+    if (delay <= 0 || signal?.aborted) return;
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(finish, delay);
+      function finish(): void { clearTimeout(timer); signal?.removeEventListener("abort", finish); resolve(); }
+      signal?.addEventListener("abort", finish, { once: true });
+    });
   }
 
   private outcomeOf(error: IntelligenceRuntimeError | undefined, signal?: AbortSignal): UsageRecord["outcome"] {

@@ -75,6 +75,27 @@ function toFunctionDeclarations(tools: ModelToolDefinition[]): Record<string, un
   };
 }
 
+/**
+ * How long the provider asked us to wait. Read from the standard `retry-after` header
+ * first, then from the RetryInfo the API returns in the error body. Only the delay is
+ * taken from the body — the message itself is not propagated.
+ */
+async function retryDelayMs(response: Response): Promise<number | undefined> {
+  const header = response.headers.get("retry-after");
+  if (header) {
+    const seconds = Number.parseFloat(header);
+    if (Number.isFinite(seconds) && seconds >= 0) return Math.round(seconds * 1_000);
+  }
+  try {
+    const body = await response.clone().text();
+    const match = body.match(/"retryDelay"\s*:\s*"([\d.]+)s"/) ?? body.match(/retry in ([\d.]+)s/i);
+    const seconds = match ? Number.parseFloat(match[1]!) : Number.NaN;
+    return Number.isFinite(seconds) ? Math.round(seconds * 1_000) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export class GeminiModelProvider implements ModelProvider {
   public readonly id = "gemini";
   private readonly apiKey: string | undefined;
@@ -150,7 +171,18 @@ export class GeminiModelProvider implements ModelProvider {
       if (signal?.aborted) throw new IntelligenceRuntimeError("EXECUTION_CANCELLED", "Execution was cancelled.", false);
       throw new IntelligenceRuntimeError("MODEL_PROVIDER_FAILED", "Gemini model request failed.", true, { provider_id: this.id });
     }
-    if (!response.ok) throw new IntelligenceRuntimeError("MODEL_PROVIDER_FAILED", "Gemini model request failed.", response.status >= 500, { provider_id: this.id, status: response.status });
+    if (!response.ok) {
+      // 429 is a wait, not a refusal. Treating it as terminal turns a few seconds of
+      // backoff into a failed request the user experiences as the feature being broken.
+      const retryable = response.status === 429 || response.status >= 500;
+      const retryAfterMs = retryable ? await retryDelayMs(response) : undefined;
+      throw new IntelligenceRuntimeError(
+        "MODEL_PROVIDER_FAILED",
+        response.status === 429 ? "Gemini rejected the request: quota or rate limit exceeded." : "Gemini model request failed.",
+        retryable,
+        { provider_id: this.id, status: response.status, ...(retryAfterMs === undefined ? {} : { retry_after_ms: retryAfterMs }) },
+      );
+    }
     const payload = await response.json() as GeminiResponse;
     const parts = payload.candidates?.[0]?.content?.parts ?? [];
     const usage = toModelUsage(payload.usageMetadata);

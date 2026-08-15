@@ -63,6 +63,13 @@ export interface ModelRequest {
   model: string;
   messages: ModelMessage[];
   tools?: ModelToolDefinition[];
+  /**
+   * Models to try, in order, once `model` has exhausted its retries. A routing
+   * instruction for the gateway, never sent to a provider: a provider only ever sees the
+   * single model it was asked to run. Ordered rather than chosen, so a failure that
+   * escalated stays reproducible.
+   */
+  fallback_models?: string[];
 }
 
 export type ModelResponse =

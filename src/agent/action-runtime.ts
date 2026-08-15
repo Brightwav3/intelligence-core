@@ -40,8 +40,21 @@ export class ActionRuntime {
     const context = await this.context.assemble(request);
     const messages: ModelMessage[] = [...context.messages];
     let toolCalls = 0;
+    // The request may carry the runtime's choice for this execution; the constructor
+    // values are the default, not an override of it.
+    const providerId = request.model?.provider_id ?? this.options.provider_id;
+    const model = request.model?.model ?? this.options.model;
+    const fallbackModels = request.model?.fallback_models ?? [];
     for (let iteration = 1; iteration <= this.maximumIterations; iteration++) {
-      const response = await this.options.models.generate({ provider_id: this.options.provider_id, model: this.options.model, messages, tools }, signal);
+      const response = await this.options.models.generate({
+        provider_id: providerId,
+        model,
+        // Every iteration may escalate independently: a mid-conversation failure on the
+        // primary must not force the whole loop to restart on the fallback.
+        ...(fallbackModels.length ? { fallback_models: fallbackModels } : {}),
+        messages,
+        tools,
+      }, signal);
       if (response.type === "final") return { output: { type: "text", text: response.message.content }, iterations: iteration, tool_calls: toolCalls };
       // Record what the model asked for before recording the answers. A provider that
       // pairs calls with responses cannot do so if the request turn is missing.

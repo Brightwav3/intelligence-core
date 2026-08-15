@@ -1,3 +1,10 @@
+/**
+ * Deterministic provider for tests.
+ *
+ * ADR 0004 — docs/decisions/0004-provider-independence.md
+ *   Exists so the whole path runs with no credentials and no network.
+ */
+
 import { IntelligenceRuntimeError } from "../errors/intelligence-runtime-error.js";
 import type { Model, ModelCapabilities, ModelProvider, ModelProviderHealth, ModelRequest, ModelResponse } from "./model-boundary.js";
 

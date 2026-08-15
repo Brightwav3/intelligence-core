@@ -7,7 +7,12 @@
 
 export type UsageOperation = "chat" | "realtime" | "embedding" | "rerank" | "image" | "audio" | "other";
 export type UsageOutcome = "completed" | "failed" | "cancelled" | "timeout";
-export type UsageRole = "voice" | "delegation" | "embedding" | "rerank" | "other";
+/**
+ * `compaction` is separate from `delegation` even though it runs through the same broker.
+ * It is spend the user never asked for — the runtime buying itself headroom — and folding
+ * it into delegation would make an unattended cost look like work someone requested.
+ */
+export type UsageRole = "voice" | "delegation" | "compaction" | "embedding" | "rerank" | "other";
 /** What to do when a call has no matching price. Never "assume free". */
 export type UnknownCostPolicy = "allow" | "warn" | "block";
 

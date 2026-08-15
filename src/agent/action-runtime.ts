@@ -1,3 +1,13 @@
+/**
+ * The action loop.
+ *
+ * ADR 0005 — docs/decisions/0005-model-output-is-input-never-authority.md
+ *   A model's tool request is input to a decision, never the decision. It is
+ *   validated, bounded by `maximum_iterations`, submitted to an external
+ *   PolicyClient, and only then executed through an external ToolClient. The
+ *   model's input includes content the user did not write.
+ */
+
 import type { IntelligenceRequest, IntelligenceOutput } from "../contracts/intelligence.js";
 import { ContextAssembler } from "../context/context-assembler.js";
 import { IntelligenceRuntimeError } from "../errors/intelligence-runtime-error.js";
@@ -36,7 +46,11 @@ export class ActionRuntime {
   }
 
   public async execute(request: IntelligenceRequest, signal?: AbortSignal): Promise<ActionResult> {
-    const tools = await this.tools.discover();
+    const maximumToolCalls = request.execution?.maximum_tool_calls;
+    const discoveredTools = await this.tools.discover();
+    // A zero budget is also a capability boundary: do not advertise tools and then hope
+    // the model chooses not to call them. Compaction uses this to stay a pure transform.
+    const tools = maximumToolCalls === 0 ? [] : discoveredTools;
     const context = await this.context.assemble(request);
     const messages: ModelMessage[] = [...context.messages];
     let toolCalls = 0;
@@ -45,7 +59,8 @@ export class ActionRuntime {
     const providerId = request.model?.provider_id ?? this.options.provider_id;
     const model = request.model?.model ?? this.options.model;
     const fallbackModels = request.model?.fallback_models ?? [];
-    for (let iteration = 1; iteration <= this.maximumIterations; iteration++) {
+    const maximumModelCalls = Math.min(this.maximumIterations, request.execution?.maximum_model_calls ?? this.maximumIterations);
+    for (let iteration = 1; iteration <= maximumModelCalls; iteration++) {
       const response = await this.options.models.generate({
         provider_id: providerId,
         model,
@@ -59,6 +74,9 @@ export class ActionRuntime {
       // Record what the model asked for before recording the answers. A provider that
       // pairs calls with responses cannot do so if the request turn is missing.
       messages.push({ role: "assistant", content: "", tool_calls: response.tool_requests });
+      if (maximumToolCalls !== undefined && toolCalls + response.tool_requests.length > maximumToolCalls) {
+        throw new IntelligenceRuntimeError("ACTION_LIMIT_EXCEEDED", "Tool call limit was exceeded.", false, { maximum_tool_calls: maximumToolCalls });
+      }
       for (const toolRequest of response.tool_requests) {
         const descriptor = tools.find((tool) => tool.id === toolRequest.tool_id);
         if (!descriptor) throw new IntelligenceRuntimeError("TOOL_NOT_FOUND", "Requested tool was not found.", false, { tool_id: toolRequest.tool_id });
@@ -70,6 +88,6 @@ export class ActionRuntime {
         toolCalls++;
       }
     }
-    throw new IntelligenceRuntimeError("ACTION_LIMIT_EXCEEDED", "Action iteration limit was exceeded.", false, { maximum_iterations: this.maximumIterations });
+    throw new IntelligenceRuntimeError("ACTION_LIMIT_EXCEEDED", "Action iteration limit was exceeded.", false, { maximum_iterations: maximumModelCalls });
   }
 }

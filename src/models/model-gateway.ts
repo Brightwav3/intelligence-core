@@ -1,3 +1,11 @@
+/**
+ * The model gateway.
+ *
+ * ADR 0004 — docs/decisions/0004-provider-independence.md
+ *   Nothing provider-specific crosses this boundary. Replacing a provider is an
+ *   adapter, never a redesign of IntelligenceRuntime.
+ */
+
 import { IntelligenceRuntimeError } from "../errors/intelligence-runtime-error.js";
 import type { ModelProvider, ModelRequest, ModelResponse } from "./model-boundary.js";
 

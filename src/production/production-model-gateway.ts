@@ -44,38 +44,51 @@ export class ProductionModelGateway implements ModelExecutor {
 
   public async generate(request: ModelRequest, signal?: AbortSignal): Promise<ModelResponse> {
     let lastError: unknown;
-    // One logical call spans every provider and retry attempt below, so a retry stays
-    // attributable to the request that caused it while remaining separately billable.
+    // One logical call spans every model, provider and retry attempt below, so an
+    // escalation stays attributable to the request that caused it while remaining
+    // separately billable.
     const callId = `call_${randomUUID()}`;
-    for (const providerId of this.options.router.providersFor(request)) {
-      for (let attempt = 0; attempt <= this.maximumRetries; attempt++) {
-        const started = Date.now();
-        const occurredAt = new Date().toISOString();
-        try {
-          this.assertPriceKnown(providerId, request.model, occurredAt);
-          const response = await this.options.models.generate({ ...request, provider_id: providerId }, signal);
-          const cost = this.costOf(providerId, request, response, occurredAt);
-          this.meter(callId, providerId, request, occurredAt, attempt, "completed", Date.now() - started, response);
-          if (this.options.maximum_cost !== undefined && cost > this.options.maximum_cost) {
-            throw new IntelligenceRuntimeError("MODEL_BUDGET_EXCEEDED", "Model cost exceeds the configured budget.", false, { maximum_cost: this.options.maximum_cost, estimated_cost: cost });
+    // `fallback_models` is routing, not content: it is stripped here so no provider ever
+    // receives a list of the models the runtime would rather have used.
+    const { fallback_models: fallbackModels, ...base } = request;
+    // Deduplicated so a fallback that repeats the primary cannot silently double its
+    // retry budget.
+    for (const model of [...new Set([request.model, ...(fallbackModels ?? [])])]) {
+      const attemptRequest: ModelRequest = { ...base, model };
+      for (const providerId of this.options.router.providersFor(attemptRequest)) {
+        for (let attempt = 0; attempt <= this.maximumRetries; attempt++) {
+          const started = Date.now();
+          const occurredAt = new Date().toISOString();
+          try {
+            this.assertPriceKnown(providerId, model, occurredAt);
+            const response = await this.options.models.generate({ ...attemptRequest, provider_id: providerId }, signal);
+            const cost = this.costOf(providerId, attemptRequest, response, occurredAt);
+            this.meter(callId, providerId, attemptRequest, occurredAt, attempt, "completed", Date.now() - started, response);
+            if (this.options.maximum_cost !== undefined && cost > this.options.maximum_cost) {
+              throw new IntelligenceRuntimeError("MODEL_BUDGET_EXCEEDED", "Model cost exceeds the configured budget.", false, { maximum_cost: this.options.maximum_cost, estimated_cost: cost });
+            }
+            this.tracer.record({ provider_id: providerId, model, outcome: "completed", duration_ms: Date.now() - started });
+            return response;
+          } catch (cause) {
+            const runtimeError = cause instanceof IntelligenceRuntimeError ? cause : undefined;
+            // A budget rejection is a decision about an already-metered response, not a
+            // provider failure to retry or escalate around. A cheaper fallback would not
+            // fix it, and trying one would spend money the ceiling just refused.
+            if (runtimeError?.code === "MODEL_BUDGET_EXCEEDED") throw cause;
+            const retryable = runtimeError?.retryable === true;
+            this.tracer.record({ provider_id: providerId, model, outcome: "failed", duration_ms: Date.now() - started, retryable });
+            this.meter(callId, providerId, attemptRequest, occurredAt, attempt, this.outcomeOf(runtimeError, signal), Date.now() - started, undefined, runtimeError?.code);
+            lastError = cause;
+            if (!retryable || attempt === this.maximumRetries) break;
+            // Retrying a rate limit immediately just spends the next attempt on the same
+            // refusal. Honour the provider's own wait when it gives one.
+            await this.waitBeforeRetry(runtimeError, attempt, signal);
           }
-          this.tracer.record({ provider_id: providerId, model: request.model, outcome: "completed", duration_ms: Date.now() - started });
-          return response;
-        } catch (cause) {
-          const runtimeError = cause instanceof IntelligenceRuntimeError ? cause : undefined;
-          // A budget rejection is a decision about an already-metered response, not a
-          // provider failure to retry around.
-          if (runtimeError?.code === "MODEL_BUDGET_EXCEEDED") throw cause;
-          const retryable = runtimeError?.retryable === true;
-          this.tracer.record({ provider_id: providerId, model: request.model, outcome: "failed", duration_ms: Date.now() - started, retryable });
-          this.meter(callId, providerId, request, occurredAt, attempt, this.outcomeOf(runtimeError, signal), Date.now() - started, undefined, runtimeError?.code);
-          lastError = cause;
-          if (!retryable || attempt === this.maximumRetries) break;
-          // Retrying a rate limit immediately just spends the next attempt on the same
-          // refusal. Honour the provider's own wait when it gives one.
-          await this.waitBeforeRetry(runtimeError, attempt, signal);
         }
       }
+      // A cancelled execution must not escalate to the next model: the caller is gone,
+      // and every further attempt is spend against work nobody is waiting for.
+      if (signal?.aborted) break;
     }
     throw lastError instanceof Error ? lastError : new IntelligenceRuntimeError("MODEL_PROVIDER_FAILED", "Model provider failed.", true);
   }

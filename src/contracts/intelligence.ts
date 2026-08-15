@@ -22,9 +22,23 @@ export interface ExecutionConstraints {
   delay_ms?: number;
 }
 
+/**
+ * The model an execution should run on. Supplied by the runtime that admitted the work,
+ * never by whatever asked for it — model selection is an operator decision, and a caller
+ * that could name its own model could name an unpriced or unapproved one.
+ */
+export interface ModelSelection {
+  provider_id?: string;
+  model: string;
+  /** Tried in the given order once the primary has exhausted its retries. */
+  fallback_models?: string[];
+}
+
 export interface IntelligenceRequest {
   request_id: RequestId;
   input: IntelligenceInput;
+  /** Overrides the action runtime's configured default for this execution only. */
+  model?: ModelSelection;
   session_id?: SessionId;
   /** Correlates this execution with the conversational turn that caused it. */
   interaction_id?: string;

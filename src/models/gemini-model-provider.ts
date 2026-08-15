@@ -1,3 +1,11 @@
+/**
+ * Gemini REST adapter.
+ *
+ * ADR 0004 — docs/decisions/0004-provider-independence.md
+ *   Provider payloads, SDK details, error shapes, and streaming mechanics stop
+ *   here. This file is the only one in the repository that knows Gemini exists.
+ */
+
 import { IntelligenceRuntimeError } from "../errors/intelligence-runtime-error.js";
 import type { Model, ModelCapabilities, ModelProvider, ModelProviderHealth, ModelRequest, ModelResponse, ModelToolDefinition, ModelToolRequest, ModelUsage } from "./model-boundary.js";
 

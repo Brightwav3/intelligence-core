@@ -1,3 +1,11 @@
+/**
+ * The external tool boundary.
+ *
+ * ADR 0005 — docs/decisions/0005-model-output-is-input-never-authority.md
+ *   NullToolClient is the unconfigured default on purpose: a deployment that
+ *   forgot to wire a tool client must execute nothing, not something reasonable.
+ */
+
 export interface ToolDescriptor {
   id: string;
   description: string;

@@ -1,3 +1,10 @@
+/**
+ * Public contracts.
+ *
+ * ADR 0003 — docs/decisions/0003-request-vs-execution.md
+ *   Request, execution, and session identity are three separate things.
+ */
+
 export type RequestId = string;
 export type ExecutionId = string;
 export type SessionId = string;

@@ -1,3 +1,11 @@
+/**
+ * Intelligence Core — public entry point.
+ *
+ * ADR 0002 — docs/decisions/0002-core-runtime-boundary.md
+ *   This is the boundary: an in-process typed library. There is no HTTP surface
+ *   and adding one broadens the Foundation without a process-boundary requirement.
+ */
+
 export * from "./contracts/intelligence.js";
 export * from "./errors/intelligence-runtime-error.js";
 export * from "./events/intelligence-events.js";

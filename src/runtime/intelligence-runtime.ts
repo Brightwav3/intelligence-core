@@ -1,3 +1,13 @@
+/**
+ * The intelligence runtime.
+ *
+ * ADR 0002 — docs/decisions/0002-core-runtime-boundary.md
+ *   In-process typed library, not a service. Transport is a future adapter.
+ * ADR 0003 — docs/decisions/0003-request-vs-execution.md
+ *   A request identifies input; an execution identifies one attempt at it.
+ *   Stale-result protection depends on the split.
+ */
+
 import { randomUUID } from "node:crypto";
 import type {
   AcceptedExecution, ExecutionId, ExecutionRecord, IntelligenceRequest, IntelligenceResult, RuntimeCapabilities,

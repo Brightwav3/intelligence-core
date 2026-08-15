@@ -1,3 +1,13 @@
+/**
+ * The action loop.
+ *
+ * ADR 0005 — docs/decisions/0005-model-output-is-input-never-authority.md
+ *   A model's tool request is input to a decision, never the decision. It is
+ *   validated, bounded by `maximum_iterations`, submitted to an external
+ *   PolicyClient, and only then executed through an external ToolClient. The
+ *   model's input includes content the user did not write.
+ */
+
 import type { IntelligenceRequest, IntelligenceOutput } from "../contracts/intelligence.js";
 import { ContextAssembler } from "../context/context-assembler.js";
 import { IntelligenceRuntimeError } from "../errors/intelligence-runtime-error.js";

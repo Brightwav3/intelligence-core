@@ -1,3 +1,11 @@
+/**
+ * The provider-neutral model boundary.
+ *
+ * ADR 0004 — docs/decisions/0004-provider-independence.md
+ *   Nothing provider-specific crosses this file. Payloads, SDKs, error shapes,
+ *   and streaming mechanics stay inside their adapter.
+ */
+
 export interface ModelCapabilities {
   streaming: boolean;
   tool_calling: boolean;

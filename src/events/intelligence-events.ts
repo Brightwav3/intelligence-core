@@ -1,3 +1,11 @@
+/**
+ * Typed lifecycle events.
+ *
+ * ADR 0003 — docs/decisions/0003-request-vs-execution.md
+ *   Every event carries both identities, so a trace can group by question or by
+ *   attempt. Content is not logged by default.
+ */
+
 import type { ExecutionId, ExecutionRecord, RequestId } from "../contracts/intelligence.js";
 
 export type IntelligenceEvent =

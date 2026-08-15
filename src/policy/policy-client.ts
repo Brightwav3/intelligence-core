@@ -1,3 +1,12 @@
+/**
+ * The external policy boundary.
+ *
+ * ADR 0005 — docs/decisions/0005-model-output-is-input-never-authority.md
+ *   `DenyAllPolicyClient` is the unconfigured default on purpose: a deployment
+ *   that forgot to wire a policy must fail closed, not run without a boundary
+ *   and look fine.
+ */
+
 import type { ToolRequest } from "../tools/tool-client.js";
 
 export type PolicyDecision =

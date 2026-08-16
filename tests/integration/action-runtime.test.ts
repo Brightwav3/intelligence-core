@@ -31,7 +31,7 @@ test("executes only policy-approved tool requests and returns the following answ
   let executions = 0;
   const tools: ToolClient = {
     discover: async () => [{ id: "weather.current", description: "Gets current weather", input_schema: { type: "object" } }],
-    execute: async (toolRequest) => { executions++; assert.deepEqual(toolRequest, { id: "call_1", tool_id: "weather.current", arguments: { city: "Prague" } }); return { tool_call_id: "call_1", content: "22 °C" }; },
+    execute: async (toolRequest) => { executions++; assert.deepEqual(toolRequest, { id: "call_1", tool_id: "weather.current", arguments: { city: "Prague" }, request_id: request.request_id }); return { tool_call_id: "call_1", content: "22 °C" }; },
   };
   const result = await runtimeFor([
     { type: "tool_requests", tool_requests: [{ id: "call_1", tool_id: "weather.current", arguments: { city: "Prague" } }] },
@@ -85,4 +85,22 @@ test("per-request model call limit overrides the runtime default", async () => {
     runtime.execute({ ...request, execution: { maximum_model_calls: 1, maximum_tool_calls: 1 } }),
     (error: unknown) => error instanceof IntelligenceRuntimeError && error.code === "ACTION_LIMIT_EXCEEDED",
   );
+});
+
+test("propagates the parent request identity to tool execution", async () => {
+  let parentRequestId: string | undefined;
+  const tools: ToolClient = {
+    discover: async () => [{ id: "memory_create", description: "Stores a memory", input_schema: { type: "object" } }],
+    execute: async (toolRequest) => {
+      parentRequestId = (toolRequest as typeof toolRequest & { request_id?: string }).request_id;
+      return { tool_call_id: toolRequest.id, content: "rejected" };
+    },
+  };
+
+  await runtimeFor([
+    { type: "tool_requests", tool_requests: [{ id: "call_1", tool_id: "memory_create", arguments: {} }] },
+    { type: "final", message: { role: "assistant", content: "Nebude uloženo." } },
+  ], allow, tools).execute(request);
+
+  assert.equal(parentRequestId, request.request_id);
 });

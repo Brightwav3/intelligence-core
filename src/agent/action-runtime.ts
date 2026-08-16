@@ -80,7 +80,9 @@ export class ActionRuntime {
       for (const toolRequest of response.tool_requests) {
         const descriptor = tools.find((tool) => tool.id === toolRequest.tool_id);
         if (!descriptor) throw new IntelligenceRuntimeError("TOOL_NOT_FOUND", "Requested tool was not found.", false, { tool_id: toolRequest.tool_id });
-        const requestForTool: ToolRequest = { id: toolRequest.id, tool_id: toolRequest.tool_id, arguments: toolRequest.arguments };
+        // Ecosystem ADR 0003 — 0003-delegation-tool-failures-remain-failed.md: the parent
+        // request lets the composing runtime associate a tool failure with its delegation.
+        const requestForTool: ToolRequest = { id: toolRequest.id, tool_id: toolRequest.tool_id, arguments: toolRequest.arguments, request_id: request.request_id };
         const decision = await this.policy.evaluate(requestForTool);
         if (decision.decision !== "allow") throw new IntelligenceRuntimeError("TOOL_ACTION_DENIED", "Tool action was not authorized.", false, { tool_id: toolRequest.tool_id, decision: decision.decision });
         const result = await this.tools.execute(requestForTool, signal);

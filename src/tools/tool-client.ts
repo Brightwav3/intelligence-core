@@ -16,6 +16,9 @@ export interface ToolRequest {
   id: string;
   tool_id: string;
   arguments: Record<string, unknown>;
+  /** Parent Intelligence request, used to preserve terminal tool failures across an action loop. */
+  // Ecosystem ADR 0003 — 0003-delegation-tool-failures-remain-failed.md.
+  request_id?: string;
 }
 
 export interface ToolResult {

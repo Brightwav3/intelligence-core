@@ -36,6 +36,12 @@ Here that means request identity and execution identity stay distinct, so a resu
 names the attempt it came from and a stale one is recognisable. See
 [ecosystem ADR 0002](../docs/decisions/0002-authority-generation.md).
 
+**INV-005 — A delegated tool failure remains a failed delegation**
+
+> Every delegated result is authoritative only if all tool executions in that request succeeded; a tool failure makes the delegation failed and the result must not be delivered as completed.
+
+See [ecosystem ADR 0003](../docs/decisions/0003-delegation-tool-failures-remain-failed.md).
+
 ## Rules in this repository
 
 1. **`IntelligenceRuntime` must never depend on a provider SDK.** Provider
